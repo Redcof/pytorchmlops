@@ -1,0 +1,5 @@
+outs:
+- md5: 98327540efa1643831ce792fc2b056dd.dir
+  size: 256812927
+  nfiles: 2736
+  path: MultilabelCarAndColorDataset
