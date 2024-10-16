@@ -1,4 +1,5 @@
 import glob
+import logging
 import pathlib
 import random
 
@@ -8,9 +9,11 @@ from lightning import LightningDataModule
 from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms
 
+logger = logging.getLogger(__file__)
+
 
 class MultilabelCarAndColorDataset(Dataset):
-    def __init__(self, im_size, split, ratio=(0.65, 0.2, 0.15)):
+    def __init__(self, im_size, split, transform, ratio=(0.65, 0.2, 0.15)):
         allowed_splits = ["train", "validate", "test"]
         assert split in allowed_splits, f"Allowed splits are {allowed_splits}, but {split} is given."
         super(MultilabelCarAndColorDataset).__init__()
@@ -20,9 +23,10 @@ class MultilabelCarAndColorDataset(Dataset):
         all_files.extend(glob.glob(str(self.root_dir / "*/*.jpg"), recursive=True))
         split_idx = allowed_splits.index(split)
         self.im_size = im_size
+        self.transform = transform
         t_v_te = self._split_list(all_files, train_ratio=ratio[0], validation_ratio=ratio[1])
         self.files = t_v_te[split_idx]
-        print(split, "size:", len(self))
+        logger.info(f"{split} size: {len(self)}")
 
     @staticmethod
     def _split_list(data, train_ratio, validation_ratio):
@@ -40,7 +44,6 @@ class MultilabelCarAndColorDataset(Dataset):
         if train_ratio + validation_ratio > 1:
             raise ValueError("Train and test ratios must sum to less than or equal to 1.")
 
-        random.seed(37)
         random.shuffle(data)  # Randomly shuffle the data to ensure unbiased splitting
 
         train_size = int(len(data) * train_ratio)
@@ -64,12 +67,7 @@ class MultilabelCarAndColorDataset(Dataset):
         if img.mode == "RGBA":
             # Convert RGBA to RGB mode, discarding the alpha channel
             img = img.convert("RGB")
-        img = transforms.Compose([
-            transforms.Resize(self.im_size),
-            transforms.RandomRotation((-180, 180)),
-            transforms.ToTensor(),
-            transforms.Normalize(0.5, 0.5)
-        ])(img)
+        img = self.transform(img)
         assert img.shape[0] == 3, path
         return img
 
@@ -82,10 +80,11 @@ class MultilabelCarAndColorDataset(Dataset):
 
 
 class MyDataModule(LightningDataModule):
-    def __init__(self, im_size, ratios=(0.65, 0.2, 0.15)):
+    def __init__(self, im_size, batch_size, ratios=(0.65, 0.2, 0.15)):
         super(LightningDataModule).__init__()
         self.im_size = im_size
         self.ratios = ratios
+        self.batch_size = batch_size
         self.allow_zero_length_dataloader_with_multiple_devices = False
 
     def _log_hyperparams(self):
@@ -93,13 +92,28 @@ class MyDataModule(LightningDataModule):
 
     def setup(self, stage):
         # create datasets
-        train_ds = MultilabelCarAndColorDataset(im_size=self.im_size, split="train", ratio=self.ratios)
-        validate_ds = MultilabelCarAndColorDataset(im_size=self.im_size, split="validate", ratio=self.ratios)
-        test_ds = MultilabelCarAndColorDataset(im_size=self.im_size, split="test", ratio=self.ratios)
+        train_transforms = transforms.Compose([
+            transforms.Resize(self.im_size),
+            transforms.RandomAutocontrast(),
+            transforms.RandomRotation((-180, 180)),
+            transforms.ToTensor(),
+            transforms.Normalize(0.5, 0.5)
+        ])
+        other_transforms = transforms.Compose([
+            transforms.Resize(self.im_size),
+            transforms.ToTensor(),
+            transforms.Normalize(0.5, 0.5)
+        ])
+        train_ds = MultilabelCarAndColorDataset(im_size=self.im_size, split="train", transform=train_transforms,
+                                                ratio=self.ratios)
+        validate_ds = MultilabelCarAndColorDataset(im_size=self.im_size, split="validate", transform=other_transforms,
+                                                   ratio=self.ratios)
+        test_ds = MultilabelCarAndColorDataset(im_size=self.im_size, split="test", transform=other_transforms,
+                                               ratio=self.ratios)
         # create dataloaders
-        self.train_loader = DataLoader(train_ds, batch_size=8)
-        self.validate_loader = DataLoader(validate_ds, batch_size=8)
-        self.test_loader = DataLoader(test_ds, batch_size=8)
+        self.train_loader = DataLoader(train_ds, batch_size=self.batch_size)
+        self.validate_loader = DataLoader(validate_ds, batch_size=self.batch_size)
+        self.test_loader = DataLoader(test_ds, batch_size=self.batch_size)
 
     def train_dataloader(self):
         return self.train_loader
