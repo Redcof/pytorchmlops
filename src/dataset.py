@@ -1,6 +1,8 @@
 import glob
 import logging
+import multiprocessing.context
 import pathlib
+import platform
 import random
 
 import torch
@@ -44,6 +46,7 @@ class MultilabelCarAndColorDataset(Dataset):
         if train_ratio + validation_ratio > 1:
             raise ValueError("Train and test ratios must sum to less than or equal to 1.")
 
+        random.seed(37)
         random.shuffle(data)  # Randomly shuffle the data to ensure unbiased splitting
 
         train_size = int(len(data) * train_ratio)
@@ -80,12 +83,15 @@ class MultilabelCarAndColorDataset(Dataset):
 
 
 class MyDataModule(LightningDataModule):
-    def __init__(self, im_size, batch_size, ratios=(0.65, 0.2, 0.15)):
+    def __init__(self, im_size, batch_size, ratios=(0.65, 0.2, 0.15), workers=0):
         super(LightningDataModule).__init__()
+        # training setting for dataloaders
         self.im_size = im_size
         self.ratios = ratios
         self.batch_size = batch_size
         self.allow_zero_length_dataloader_with_multiple_devices = False
+        # multiprocessing settings for dataloaders
+        self.workers = workers
 
     def _log_hyperparams(self):
         ...
@@ -104,16 +110,34 @@ class MyDataModule(LightningDataModule):
             transforms.ToTensor(),
             transforms.Normalize(0.5, 0.5)
         ])
+        # init datasets
         train_ds = MultilabelCarAndColorDataset(im_size=self.im_size, split="train", transform=train_transforms,
                                                 ratio=self.ratios)
         validate_ds = MultilabelCarAndColorDataset(im_size=self.im_size, split="validate", transform=other_transforms,
                                                    ratio=self.ratios)
         test_ds = MultilabelCarAndColorDataset(im_size=self.im_size, split="test", transform=other_transforms,
                                                ratio=self.ratios)
+        # define a few dataloader settings
+        persistent_workers = self.workers > 0
+        multiprocessing_context = None if persistent_workers else (multiprocessing.context.SpawnContext
+                                                                   if platform.system() == "Windows"
+                                                                   else multiprocessing.context.ForkServerContext)
         # create dataloaders
-        self.train_loader = DataLoader(train_ds, batch_size=self.batch_size)
-        self.validate_loader = DataLoader(validate_ds, batch_size=self.batch_size)
-        self.test_loader = DataLoader(test_ds, batch_size=self.batch_size)
+        self.train_loader = DataLoader(train_ds,
+                                       batch_size=self.batch_size,
+                                       num_workers=self.workers,
+                                       persistent_workers=persistent_workers,
+                                       multiprocessing_context=multiprocessing_context)
+        self.validate_loader = DataLoader(validate_ds,
+                                          batch_size=self.batch_size,
+                                          num_workers=self.workers,
+                                          persistent_workers=persistent_workers,
+                                          multiprocessing_context=multiprocessing_context)
+        self.test_loader = DataLoader(test_ds,
+                                      batch_size=self.batch_size,
+                                      num_workers=self.workers,
+                                      persistent_workers=persistent_workers,
+                                      multiprocessing_context=multiprocessing_context)
 
     def train_dataloader(self):
         return self.train_loader

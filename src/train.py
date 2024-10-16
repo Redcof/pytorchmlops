@@ -2,7 +2,8 @@ import random
 
 import numpy as np
 from dotenv import load_dotenv
-from torchvision.models import EfficientNet_B0_Weights
+
+from pl_module import CNN_pl_module
 
 load_dotenv()  # make sure python working directory to project root
 
@@ -10,12 +11,11 @@ import lightning
 import mlflow.pytorch
 import torch
 from torch.nn.functional import cross_entropy
-import torchvision
 from mlflow import MlflowClient
-from torchmetrics import Accuracy, F1Score
 
 from dataset import MyDataModule
 import logging
+from ignite.utils import manual_seed
 
 logger = logging.getLogger(__file__)
 # create a formatter object
@@ -26,71 +26,6 @@ formatter = logging.Formatter(fmt=Log_Format)
 handler = logging.StreamHandler()
 handler.setFormatter(formatter)
 logger.addHandler(handler)
-
-
-class CNN_pl_module(lightning.LightningModule):
-    def __init__(self, num_labels, criterion, optimizer, lr):
-        super().__init__()
-        # model
-        model = torchvision.models.efficientnet_b0(weights=EfficientNet_B0_Weights.IMAGENET1K_V1)
-        model.classifier[-1] = torch.nn.Linear(model.classifier[-1].in_features, num_labels)
-        self.model = model
-        # others
-        self.criterion = criterion
-        self.optimizer = optimizer
-        self.lr = lr
-        # metrics
-        self.train_accuracy = Accuracy("multilabel", num_labels=num_labels)
-        self.train_f1score = F1Score("multilabel", num_labels=num_labels)
-        self.val_accuracy = Accuracy("multilabel", num_labels=num_labels)
-        self.val_f1score = F1Score("multilabel", num_labels=num_labels)
-        self.test_accuracy = Accuracy("multilabel", num_labels=num_labels)
-        self.test_f1score = F1Score("multilabel", num_labels=num_labels)
-
-    def forward(self, x):
-        return torch.sigmoid(self.model(x))
-
-    def training_step(self, batch, batch_nb):
-        x, y = batch
-        probas = self(x)
-        loss = self.criterion(probas, y)
-        acc = self.train_accuracy(probas, y)
-        f1_score = self.train_f1score(probas, y)
-
-        # PyTorch `self.log` will be automatically captured by MLflow.
-        self.log("train_loss", loss, on_epoch=True)
-        self.log("train_acc", acc, on_epoch=True)
-        self.log("train_f1_score", f1_score, on_epoch=True)
-        return loss
-
-    def validation_step(self, batch, batch_nb):
-        x, y = batch
-        probas = self(x)
-        loss = self.criterion(probas, y)
-        acc = self.val_accuracy(probas, y)
-        f1_score = self.val_f1score(probas, y)
-
-        # PyTorch `self.log` will be automatically captured by MLflow.
-        self.log("val_loss", loss, on_epoch=True)
-        self.log("val_acc", acc, on_epoch=True)
-        self.log("val_f1_score", f1_score, on_epoch=True)
-        return loss
-
-    def test_step(self, batch, batch_nb):
-        x, y = batch
-        probas = self(x)
-        loss = self.criterion(probas, y)
-        acc = self.val_accuracy(probas, y)
-        f1_score = self.val_f1score(probas, y)
-
-        # PyTorch `self.log` will be automatically captured by MLflow.
-        self.log("test_loss", loss, on_epoch=True)
-        self.log("test_acc", acc, on_epoch=True)
-        self.log("test_f1_score", f1_score, on_epoch=True)
-        return loss
-
-    def configure_optimizers(self):
-        return self.optimizer(self.model.parameters(), lr=self.lr)
 
 
 def print_auto_logged_info(r):
@@ -115,23 +50,30 @@ if __name__ == '__main__':
     NUM_LABELS = 6
     BATCH_SIZE = 16
     RANDOM_SEED = 37
+    DATALOADER_WORKERS = 4
     CRITERION = cross_entropy
-    OPTIMIZER = torch.optim.Adam
+    OPTIMIZER = torch.optim.AdamW
     LR = 0.02
 
     # set random seed
     random.seed(RANDOM_SEED)
     torch.manual_seed(RANDOM_SEED)
     np.random.seed(RANDOM_SEED)
-
-    # Initialize our model.
-    cnn_model = CNN_pl_module(NUM_LABELS, CRITERION, OPTIMIZER, LR)
+    manual_seed(RANDOM_SEED)
 
     # Load dataset.
-    datamodule = MyDataModule(im_size=(IMG_SIZE, IMG_SIZE), ratios=(0.65, 0.2, 0.15), batch_size=BATCH_SIZE)
+    datamodule = MyDataModule(im_size=(IMG_SIZE, IMG_SIZE),
+                              ratios=(0.65, 0.2, 0.15),
+                              batch_size=BATCH_SIZE,
+                              workers=DATALOADER_WORKERS)
+
+    # Initialize our model.
+    cnn_model = CNN_pl_module(NUM_LABELS, CRITERION, OPTIMIZER, LR,
+                              ("matiz", "rio", "tiggo", "black", "blue", "red"))
+
     # Initialize a trainer.
     # checkpoint_callback = ModelCheckpoint(save_top_k=0)
-    trainer = lightning.Trainer(max_epochs=5, accelerator='gpu',
+    trainer = lightning.Trainer(max_epochs=1, accelerator='gpu',
                                 callbacks=[],
                                 num_sanity_val_steps=1)
 
