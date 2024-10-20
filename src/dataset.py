@@ -11,7 +11,7 @@ from lightning import LightningDataModule
 from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms
 
-logger = logging.getLogger(__file__)
+logger = logging.getLogger(__name__)
 
 
 class MultilabelCarAndColorDataset(Dataset):
@@ -119,9 +119,7 @@ class MyDataModule(LightningDataModule):
                                                ratio=self.ratios)
         # define a few dataloader settings
         persistent_workers = self.workers > 0
-        multiprocessing_context = None if persistent_workers else (multiprocessing.context.SpawnContext
-                                                                   if platform.system() == "Windows"
-                                                                   else multiprocessing.context.ForkServerContext)
+        multiprocessing_context = None
         # create dataloaders
         self.train_loader = DataLoader(train_ds,
                                        batch_size=self.batch_size,

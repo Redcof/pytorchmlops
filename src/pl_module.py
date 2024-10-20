@@ -11,7 +11,7 @@ from torchvision.models import EfficientNet_B0_Weights
 
 from metrics import ClassificationReport
 
-logger = logging.getLogger(__file__)
+logger = logging.getLogger(__name__)
 
 
 class CNN_pl_module(lightning.LightningModule):
@@ -47,12 +47,12 @@ class CNN_pl_module(lightning.LightningModule):
         x, y = batch
         probas = self(x)
         loss = self.criterion(probas, y)
+        # metric operations
         acc = self.train_accuracy(probas, y)
         f1_score = self.train_f1score(probas, y)
         self.train_pr_curve.update(probas, y.to(torch.int8))
         self.train_classification_report.update(probas >= self.probability_threshold, y)
-
-        # PyTorch `self.log` will be automatically captured by MLflow.
+        # metric logging
         self.log("train_loss", loss, on_epoch=True)
         self.log("train_acc", acc, on_epoch=True)
         self.log("train_f1_score", f1_score, on_epoch=True)
@@ -62,12 +62,12 @@ class CNN_pl_module(lightning.LightningModule):
         x, y = batch
         probas = self(x)
         loss = self.criterion(probas, y)
+        # metric operations
         acc = self.val_accuracy(probas, y)
         f1_score = self.val_f1score(probas, y)
         self.val_pr_curve.update(probas, y.to(torch.int8))
         self.val_classification_report.update(probas >= self.probability_threshold, y.cpu())
-
-        # PyTorch `self.log` will be automatically captured by MLflow.
+        # metric logging
         self.log("val_loss", loss, on_epoch=True)
         self.log("val_acc", acc, on_epoch=True)
         self.log("val_f1_score", f1_score, on_epoch=True)
@@ -77,10 +77,10 @@ class CNN_pl_module(lightning.LightningModule):
         x, y = batch
         probas = self(x)
         loss = self.criterion(probas, y)
-        acc = self.val_accuracy(probas, y)
-        f1_score = self.val_f1score(probas, y)
-
-        # PyTorch `self.log` will be automatically captured by MLflow.
+        # metric operations
+        acc = self.test_accuracy(probas, y)
+        f1_score = self.test_accuracy(probas, y)
+        # metric logging
         self.log("test_loss", loss, on_epoch=True)
         self.log("test_acc", acc, on_epoch=True)
         self.log("test_f1_score", f1_score, on_epoch=True)
@@ -95,16 +95,18 @@ class CNN_pl_module(lightning.LightningModule):
         self._plot_f1_curves()
 
     def _classification_report(self):
+        logger.info("Saving classification report")
         r = self.train_classification_report.compute()
-        mlflow.log_dict(r, "classification_reports/train_classification_report.json")
+        mlflow.log_dict(r, "classification_reports/train_classification_report.yaml")
         r = self.val_classification_report.compute()
-        mlflow.log_dict(r, "classification_reports/val_classification_report.json")
+        mlflow.log_dict(r, "classification_reports/val_classification_report.yaml")
         r = self.train_classification_report.compute(output_dict=False)
         logger.info(r)
         r = self.val_classification_report.compute(output_dict=False)
         logger.info(r)
 
     def _plot_pr_curves(self):
+        logger.info("Saving Precision-Recall Curve")
         plt.figure(figsize=(10, 7))
         # === === === === === === === === ===
         ax = plt.subplot(121)
@@ -128,6 +130,7 @@ class CNN_pl_module(lightning.LightningModule):
         plt.close()
 
     def _plot_f1_curves(self):
+        logger.info("Saving F1-Score curve")
         plt.figure(figsize=(10, 7))
         # === === === === === === === === ===
         ax = plt.subplot(121)
